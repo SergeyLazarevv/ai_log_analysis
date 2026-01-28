@@ -1,0 +1,84 @@
+services:
+  mongodb:
+    image: "mongo:7.0"
+    restart: unless-stopped
+    networks:
+      - graylog
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+
+  opensearch:
+    # NOTE: Graylog warns NOT to use OpenSearch 2.16 (unsupported).
+    image: "opensearchproject/opensearch:2.15.0"
+    restart: unless-stopped
+    networks:
+      - graylog
+    environment:
+      - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
+      - "bootstrap.memory_lock=true"
+      - "discovery.type=single-node"
+      - "action.auto_create_index=false"
+      - "plugins.security.ssl.http.enabled=false"
+      - "plugins.security.disabled=true"
+      # Required by some OpenSearch versions; keep it in .env even if security is disabled.
+      - "OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_INITIAL_ADMIN_PASSWORD}"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    ports:
+      - "9203:9200" # OpenSearch HTTP (optional, for debugging)
+      - "9303:9300" # OpenSearch transport (optional)
+
+  graylog:
+    image: "${GRAYLOG_IMAGE:-graylog/graylog:7.0}"
+    hostname: "graylog"
+    restart: unless-stopped
+    depends_on:
+      - mongodb
+      - opensearch
+    entrypoint: "/usr/bin/tini -- wait-for-it opensearch:9200 -- /docker-entrypoint.sh"
+    networks:
+      - graylog
+    environment:
+      GRAYLOG_NODE_ID_FILE: "/usr/share/graylog/data/config/node-id"
+      GRAYLOG_HTTP_BIND_ADDRESS: "0.0.0.0:9000"
+      GRAYLOG_HTTP_EXTERNAL_URI: "${GRAYLOG_HTTP_EXTERNAL_URI:-http://127.0.0.1:9000/}"
+
+      GRAYLOG_MONGODB_URI: "mongodb://mongodb:27017/graylog"
+      # Graylog uses this setting name even with OpenSearch backend.
+      GRAYLOG_ELASTICSEARCH_HOSTS: "http://opensearch:9200"
+
+      # Required
+      GRAYLOG_PASSWORD_SECRET: "${GRAYLOG_PASSWORD_SECRET}"
+      GRAYLOG_ROOT_PASSWORD_SHA2: "${GRAYLOG_ROOT_PASSWORD_SHA2}"
+
+      # Useful in containers for reporting features
+      GRAYLOG_REPORT_DISABLE_SANDBOX: "true"
+    ports:
+      # Graylog Web UI + REST API
+      - "9000:9000/tcp"
+      # GELF (handy for app logs)
+      - "12201:12201/tcp"
+      - "12201:12201/udp"
+      # Syslog (optional)
+      - "5140:5140/tcp"
+      - "5140:5140/udp"
+    volumes:
+      - graylog_data:/usr/share/graylog/data
+
+networks:
+  graylog:
+    driver: bridge
+
+volumes:
+  mongodb_data:
+  mongodb_config:
+  opensearch_data:
+  graylog_data:
