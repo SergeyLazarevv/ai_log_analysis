@@ -1,1 +1,6 @@
 .env
+.env.*
+!.env.example
+ollama/certs/
+ollama/models/*.gguf
+ollama/models/Modelfile

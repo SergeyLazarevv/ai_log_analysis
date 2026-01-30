@@ -80,3 +80,24 @@ php php/graylog_seed.php random --count=50 --sleep-ms=100
 
 По умолчанию скрипт отправляет в `127.0.0.1:12201` по UDP.
 
+## Локальная LLM (Ollama) отдельным compose
+
+Ollama поднимается отдельно в папке `ollama/` и слушает API на `http://127.0.0.1:11434`.  
+Также включён **Open WebUI** (веб-интерфейс) на `http://127.0.0.1:3000`.
+
+```bash
+cd /home/user/projects/LogsAi/ollama
+docker compose up -d
+```
+
+После запуска открой `http://127.0.0.1:3000` и создай аккаунт (первый пользователь — админ).
+
+Чтобы скачать лёгкую модель (пример: `llama3.2:1b`):
+
+```bash
+cd /home/user/projects/LogsAi/ollama
+docker compose --profile init up pull-model
+```
+
+Если `ollama pull` падает с `x509: certificate signed by unknown authority`, см. `ollama/README.md` (нужно добавить корпоративный CA в `ollama/certs/`).
+
