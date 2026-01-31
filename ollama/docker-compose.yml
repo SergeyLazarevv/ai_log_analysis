@@ -6,6 +6,8 @@ services:
       # Заставить Ollama (Go) использовать системное хранилище CA (в т.ч. certs из ./certs)
       - SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
       - SSL_CERT_DIR=/etc/ssl/certs
+      # CPU: число потоков для инференса (по умолчанию авто; задай по числу ядер хоста для ускорения)
+      - OLLAMA_NUM_THREADS=8
     entrypoint: ["/bin/sh", "-lc"]
     command:
       - |
@@ -50,6 +52,10 @@ services:
       - "3000:8080"
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
+      # Отключаем загрузку с Hugging Face (sentence-transformers для Documents/RAG).
+      # Чат с локальной моделью работает без этого. Убирает ошибки SSL при перехвате HTTPS.
+      - HF_HUB_OFFLINE=1
+      - RAG_EMBEDDING_MODEL_AUTO_UPDATE=false
     volumes:
       - open_webui_data:/app/backend/data
       - ./certs:/usr/local/share/ca-certificates/local:ro

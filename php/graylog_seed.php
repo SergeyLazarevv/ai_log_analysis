@@ -10,6 +10,7 @@
  *   php php/graylog_seed.php order_created --order-id=12345
  *   php php/graylog_seed.php order_cancelled --order-id=12345 --reason="payment timeout"
  *   php php/graylog_seed.php sms_error --order-id=12345 --phone="+79990001122"
+ *   php php/graylog_seed.php error --count=10
  *   php php/graylog_seed.php random --count=50 --sleep-ms=100
  *
  * Env vars:
@@ -33,6 +34,7 @@ Scenarios:
   order_created
   order_cancelled
   sms_error
+  error       — лог с текстом "error" в сообщении (для поиска в Graylog)
   random
 
 Env:
@@ -213,8 +215,22 @@ function emitScenario(string $scenario, array $opts): array
                 ]
             );
 
+        case 'error':
+            // Сообщение с "error" в тексте — для проверки поиска в Graylog (query: error)
+            $reason = $opts['reason'] ?? 'Connection timeout';
+            return buildGelf(
+                "Application error: {$reason} (order #{$orderId})",
+                3,
+                [
+                    'event' => 'app_error',
+                    'order_id' => $orderId,
+                    'error_type' => 'runtime',
+                    'source' => 'php-seeder',
+                ]
+            );
+
         case 'random':
-            $scenarios = ['order_created', 'order_cancelled', 'sms_error'];
+            $scenarios = ['order_created', 'order_cancelled', 'sms_error', 'error'];
             return emitScenario($scenarios[array_rand($scenarios)], $opts);
 
         default:

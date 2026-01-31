@@ -2,6 +2,8 @@
 
 Короткая инструкция для локального запуска Graylog и наполнения логами.
 
+**→ Быстрый старт:** [QUICKSTART.md](QUICKSTART.md) — запуск, логи, UI, вопросы по логам.
+
 ## Запуск Graylog (Docker Compose)
 
 0) Убедись, что доступен **Compose v2** (команда `docker compose`).
@@ -101,3 +103,21 @@ docker compose --profile init up pull-model
 
 Если `ollama pull` падает с `x509: certificate signed by unknown authority`, см. `ollama/README.md` (нужно добавить корпоративный CA в `ollama/certs/`).
 
+## Связка Graylog и нейросети по MCP
+
+Чтобы подключать к Graylog LLM (в т.ч. локальную модель Ollama) для анализа логов и отчётности через естественный язык, настрой **Model Context Protocol (MCP)**:
+
+- **Graylog 7.0+** отдаёт MCP endpoint (`/api/mcp`) с инструментами: поиск логов, списки стримов, статус системы и т.д.
+- **MCP-клиент** (Cursor, LM Studio, Claude Desktop) подключается к Graylog по MCP и к Ollama как к модели; в чате ты задаёшь вопросы по логам — модель вызывает инструменты Graylog и формирует ответ.
+
+Пошаговый план, объяснение и настройка Cursor/LM Studio — в **[mcp/README.md](mcp/README.md)**.
+
+## Logs AI + Yandex (веб-интерфейс с Graylog MCP)
+
+Микросервис **logs-ai-yandex** — веб-UI для чата с Yandex GPT, который может обращаться к Graylog по MCP:
+
+- Задаёшь вопрос в браузере → модель при необходимости вызывает инструменты Graylog → получаешь ответ
+- Использует Yandex GPT API вместо локальной модели
+- Запуск: `cd logs-ai-yandex && uvicorn app:app --port 8000` или `docker compose up -d`
+
+Подробнее — в **[logs-ai-yandex/README.md](logs-ai-yandex/README.md)**.
