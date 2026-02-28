@@ -2,7 +2,8 @@
 
 Короткая инструкция для локального запуска Graylog и наполнения логами.
 
-**→ Быстрый старт:** [QUICKSTART.md](QUICKSTART.md) — запуск, логи, UI, вопросы по логам.
+**→ Быстрый старт:** [QUICKSTART.md](QUICKSTART.md) — запуск, логи, UI, вопросы по логам.  
+**→ Ошибки при сборке/запуске:** [TROUBLESHOOTING.md](TROUBLESHOOTING.md) (например, `x509: certificate signed by unknown authority`).
 
 ## Запуск Graylog (Docker Compose)
 
@@ -114,10 +115,20 @@ docker compose --profile init up pull-model
 
 ## Logs AI + Yandex (веб-интерфейс с Graylog MCP)
 
-Микросервис **logs-ai-yandex** — веб-UI для чата с Yandex GPT, который может обращаться к Graylog по MCP:
+Веб-чат с Yandex GPT, который анализирует логи через Graylog MCP.
 
-- Задаёшь вопрос в браузере → модель при необходимости вызывает инструменты Graylog → получаешь ответ
-- Использует Yandex GPT API вместо локальной модели
-- Запуск: `cd logs-ai-yandex && uvicorn app:app --port 8000` или `docker compose up -d`
+### Запуск
+
+```bash
+cd logs-ai-yandex
+python -m venv .venv && source .venv/bin/activate  # первый раз
+pip install -r requirements.txt                     # первый раз
+uvicorn app:app --reload --port 8000
+```
+
+**UI:** http://localhost:8000  
+**Диагностика:** http://localhost:8000/api/status
+
+> Убедись, что Graylog запущен (`docker compose up -d` в корне) и в `.env` заданы `GRAYLOG_MCP_AUTH` и `YANDEX_API_KEY`.
 
 Подробнее — в **[logs-ai-yandex/README.md](logs-ai-yandex/README.md)**.

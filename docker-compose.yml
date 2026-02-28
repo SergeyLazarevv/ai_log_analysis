@@ -1,4 +1,37 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    networks:
+      - graylog
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-logsai}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-logsai_secret}"
+      POSTGRES_DB: "${POSTGRES_DB:-logsai}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-logsai} -d ${POSTGRES_DB:-logsai}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  adminer:
+    image: adminer:latest
+    restart: unless-stopped
+    networks:
+      - graylog
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   mongodb:
     image: "mongo:7.0"
     restart: unless-stopped
@@ -73,11 +106,13 @@ services:
     volumes:
       - graylog_data:/usr/share/graylog/data
 
+
 networks:
   graylog:
     driver: bridge
 
 volumes:
+  postgres_data:
   mongodb_data:
   mongodb_config:
   opensearch_data:

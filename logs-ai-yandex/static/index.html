@@ -133,7 +133,7 @@
         }
     </style>
 </head>
-<body>
+<body data-version="2-conversation-from-dom">
     <header>
         <h1>Logs AI + Yandex</h1>
         <p>Задайте вопрос по логам — модель обратится к Graylog через MCP и даст ответ</p>
@@ -157,6 +157,8 @@
         const chat = document.getElementById('chat');
         const input = document.getElementById('input');
         const btn = document.getElementById('btn');
+        // История диалога для контекста (последние реплики user/assistant)
+        let conversationHistory = [];
 
         function addMsg(role, text) {
             const div = document.createElement('div');
@@ -172,6 +174,22 @@
             return div.innerHTML.replace(/\n/g, '<br>');
         }
 
+        // Собрать историю из видимых сообщений (кроме только что добавленного — оно уходит в message)
+        function getConversationForRequest() {
+            var fromDom = [];
+            var nodes = chat.querySelectorAll('.msg');
+            for (var i = 0; i < nodes.length; i++) {
+                var el = nodes[i];
+                var role = el.classList.contains('user') ? 'user' : 'assistant';
+                var contentEl = el.querySelector('.role + div') || el.querySelector('div:last-child');
+                var content = contentEl ? contentEl.textContent.trim() : '';
+                if (content) fromDom.push({ role: role, content: content });
+            }
+            // Последний элемент — текущее сообщение пользователя (уже в message), в conversation не включаем
+            var prev = fromDom.length ? fromDom.slice(0, -1) : [];
+            return prev.slice(-20);
+        }
+
         function handleSubmit(e) {
             e.preventDefault();
             e.stopPropagation();
@@ -183,10 +201,14 @@
             btn.disabled = true;
             btn.innerHTML = '<span class="loading"></span>';
 
+            var conversationToSend = getConversationForRequest();
+            // Всегда отправляем ключ conversation (массив), чтобы бэкенд получал историю
+            var payload = { message: text, conversation: conversationToSend || [] };
+
             fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: text })
+                body: JSON.stringify(payload)
             })
             .then(function(res) {
                 return res.text().then(function(txt) {
@@ -195,7 +217,15 @@
                     if (!res.ok) {
                         addMsg('assistant', 'Ошибка: ' + (data.detail || res.statusText));
                     } else {
-                        addMsg('assistant', data.response || '');
+                        var responseText = data.response || '';
+                        addMsg('assistant', responseText);
+                        // Сохраняем в историю для контекста следующих запросов
+                        conversationHistory.push({ role: 'user', content: text });
+                        conversationHistory.push({ role: 'assistant', content: responseText });
+                        // Держим последние 20 реплик (10 пар), чтобы не перегружать контекст
+                        if (conversationHistory.length > 20) {
+                            conversationHistory = conversationHistory.slice(-20);
+                        }
                     }
                 });
             })
