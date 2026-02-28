@@ -113,22 +113,30 @@ docker compose --profile init up pull-model
 
 Пошаговый план, объяснение и настройка Cursor/LM Studio — в **[mcp/README.md](mcp/README.md)**.
 
-## Logs AI + Yandex (веб-интерфейс с Graylog MCP)
+## AI Agent + Open WebUI
 
-Веб-чат с Yandex GPT, который анализирует логи через Graylog MCP.
+Агент на Yandex GPT анализирует логи (Graylog MCP) и данные из БД (Postgres MCP). Чат-интерфейс — **Open WebUI**.
 
-### Запуск
+### Шаг 1 — Запустить агент (FastAPI)
 
 ```bash
-cd logs-ai-yandex
-python -m venv .venv && source .venv/bin/activate  # первый раз
-pip install -r requirements.txt                     # первый раз
-uvicorn app:app --reload --port 8000
+cd ai-agent
+source .venv/bin/activate          # если ещё не активировано
+uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-**UI:** http://localhost:8000  
-**Диагностика:** http://localhost:8000/api/status
+Убедись, что в `.env` заданы `GRAYLOG_MCP_AUTH` и `YANDEX_API_KEY`.
 
-> Убедись, что Graylog запущен (`docker compose up -d` в корне) и в `.env` заданы `GRAYLOG_MCP_AUTH` и `YANDEX_API_KEY`.
+### Шаг 2 — Запустить Open WebUI
 
-Подробнее — в **[logs-ai-yandex/README.md](logs-ai-yandex/README.md)**.
+```bash
+cd open-webui
+docker compose up -d
+```
+
+**Чат:** http://localhost:3000 — создай аккаунт (первый — админ), выбери модель **ai-agent**.  
+**Диагностика агента:** http://localhost:8000/api/status
+
+> Если при запуске Open WebUI образ не скачивается из-за корпоративного SSL — см. [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+
+Подробнее — в **[ai-agent/README.md](ai-agent/README.md)**.

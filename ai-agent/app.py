@@ -1,4 +1,4 @@
-"""Logs AI + Yandex: Web UI for chat with Graylog MCP via Yandex GPT."""
+"""AI Agent: Web UI for chat with Graylog and PostgreSQL via Yandex GPT."""
 
 from __future__ import annotations
 
@@ -15,10 +15,12 @@ logging.basicConfig(
 )
 log = logging.getLogger("logs_ai")
 
+import time
+import uuid
+
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from agent import LogsAgent
@@ -31,11 +33,7 @@ load_dotenv(_root.parent / "yandexGptCli" / "src" / ".env")
 
 # ── FastAPI app ─────────────────────────────────────────────────────────────
 
-app = FastAPI(title="Logs AI + Yandex", description="Чат с Graylog через Yandex GPT")
-
-static_dir = Path(__file__).parent / "static"
-if static_dir.exists():
-    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+app = FastAPI(title="AI Agent", description="Чат с Graylog и PostgreSQL через Yandex GPT")
 
 
 @app.on_event("startup")
@@ -61,17 +59,6 @@ class ChatResponse(BaseModel):
 
 
 # ── Роуты ───────────────────────────────────────────────────────────────────
-
-@app.get("/", response_class=HTMLResponse)
-async def index():
-    html_path = static_dir / "index.html"
-    if html_path.exists():
-        return HTMLResponse(
-            content=html_path.read_text(encoding="utf-8"),
-            headers={"Cache-Control": "no-cache, no-store, must-revalidate",
-                     "Pragma": "no-cache", "Expires": "0"},
-        )
-    return HTMLResponse("<h1>Logs AI</h1><p>Создайте static/index.html</p>")
 
 
 @app.post("/api/chat", response_model=ChatResponse)
@@ -103,6 +90,72 @@ async def chat(raw_request: Request):
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
+
+
+# ── OpenAI-совместимый API (для Open WebUI) ──────────────────────────────────
+
+@app.get("/v1/models")
+async def openai_list_models():
+    """Open WebUI запрашивает список моделей при старте."""
+    return JSONResponse({
+        "object": "list",
+        "data": [{
+            "id": "logs-ai",
+            "object": "model",
+            "created": int(time.time()),
+            "owned_by": "ai-agent",
+        }],
+    })
+
+
+@app.post("/v1/chat/completions")
+async def openai_chat_completions(raw_request: Request):
+    """
+    OpenAI-совместимый эндпоинт для Open WebUI.
+    Open WebUI шлёт сообщения в формате OpenAI, мы прогоняем через LogsAgent
+    и возвращаем ответ в формате OpenAI.
+    """
+    body = await raw_request.json()
+    messages: list[dict] = body.get("messages", [])
+
+    # Извлекаем последнее сообщение пользователя
+    user_messages = [m for m in messages if m.get("role") == "user"]
+    if not user_messages:
+        raise HTTPException(status_code=400, detail="Нет сообщений пользователя")
+    msg = user_messages[-1].get("content", "").strip()
+    if not msg:
+        raise HTTPException(status_code=400, detail="Пустое сообщение")
+
+    log.info("[OPENAI] Запрос от Open WebUI: %d симв.: %s", len(msg), msg[:120])
+    config = AppConfig.from_env()
+    agent = LogsAgent(config)
+
+    try:
+        response_text = await agent.run(msg, history=[])
+        log.info("[OPENAI] Ответ готов: %d симв.", len(response_text))
+    except Exception as e:
+        log.exception("[OPENAI] Исключение при обработке запроса")
+        cause = e
+        while getattr(cause, "__cause__", None):
+            cause = cause.__cause__
+        raise HTTPException(status_code=500, detail=f"Ошибка: {cause}")
+
+    return JSONResponse({
+        "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": body.get("model", "logs-ai"),
+        "choices": [{
+            "index": 0,
+            "message": {"role": "assistant", "content": response_text},
+            "finish_reason": "stop",
+        }],
+        "usage": {
+            "prompt_tokens": len(msg) // 4,
+            "completion_tokens": len(response_text) // 4,
+            "total_tokens": (len(msg) + len(response_text)) // 4,
+        },
+    })
 
 
 @app.get("/api/status")
@@ -138,7 +191,7 @@ async def _check_graylog(config: AppConfig) -> str:
                 "params": {
                     "protocolVersion": "2025-06-18",
                     "capabilities": {},
-                    "clientInfo": {"name": "logs-ai-check", "version": "1.0"},
+                    "clientInfo": {"name": "ai-agent-check", "version": "1.0"},
                 },
             },
             timeout=10,

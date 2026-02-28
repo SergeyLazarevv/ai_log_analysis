@@ -27,7 +27,7 @@
 
 ---
 
-## Docker: `x509: certificate signed by unknown authority` при сборке logs-ai
+## Docker: `x509: certificate signed by unknown authority` при сборке ai-agent
 
 **Симптом:** при `docker compose up -d` или `docker compose build` ошибка:
 ```text
@@ -51,15 +51,15 @@ Docker не доверяет сертификату при обращении к
 3. **Собрать образ в окружении с нормальным доступом к Docker Hub**  
    Например, на другой машине или в CI, затем сохранить образ и загрузить на нужную:
    ```bash
-   docker save logsai-logs-ai:latest | gzip > logs-ai.tar.gz
+   docker save logsai-ai-agent:latest | gzip > ai-agent.tar.gz
    # на целевой машине:
-   gunzip -c logs-ai.tar.gz | docker load
+   gunzip -c ai-agent.tar.gz | docker load
    ```
 
-4. **Запускать Logs AI без Docker (локально)**  
+4. **Запускать AI Agent без Docker (локально)**  
    Если нужен только чат, без монолита в контейнерах:
    ```bash
-   cd logs-ai-yandex
+   cd ai-agent
    pip install -r requirements.txt
    # Установи Node.js для Postgres MCP (если нужен)
    export GRAYLOG_MCP_URL=http://127.0.0.1:9000/api/mcp
@@ -72,4 +72,4 @@ Docker не доверяет сертификату при обращении к
    Postgres, Graylog и т.д. при этом могут оставаться в Docker или быть внешними.
 
 5. **Использовать другой registry**  
-   Если у вас есть внутренний или зеркальный registry с образом Python, в `logs-ai-yandex/Dockerfile` можно заменить `FROM python:3.12-slim` на полный адрес образа из этого registry (например `FROM your-registry.example.com/python:3.12-slim`).
+   Если у вас есть внутренний или зеркальный registry с образом Python, в `ai-agent/Dockerfile` можно заменить `FROM python:3.12-slim` на полный адрес образа из этого registry (например `FROM your-registry.example.com/python:3.12-slim`).

@@ -1,5 +1,5 @@
 services:
-  logs-ai-yandex:
+  ai-agent:
     build: .
     ports:
       - "3020:8000"

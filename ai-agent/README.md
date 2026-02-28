@@ -1,6 +1,6 @@
-# Logs AI + Yandex
+# AI Agent
 
-Веб-интерфейс для анализа логов Graylog через Yandex GPT. Модель может обращаться к Graylog по MCP и получать данные (поиск логов, стримы, статус системы).
+Веб-интерфейс для работы с Graylog и PostgreSQL через Yandex GPT. Модель может обращаться к Graylog и БД по MCP и получать данные (поиск логов, стримы, статус системы, запросы к таблицам).
 
 ## Архитектура
 
@@ -42,7 +42,7 @@
 ## Установка
 
 ```bash
-cd logs-ai-yandex
+cd ai-agent
 pip install -r requirements.txt
 ```
 
@@ -56,7 +56,7 @@ pip install -r requirements.txt
 | `GRAYLOG_MCP_URL`, `GRAYLOG_MCP_AUTH` | `LogsAi/.env` (из `mcp/cursor-mcp-config.json`) |
 | `POSTGRES_MCP_DSN` (опционально) | `LogsAi/.env` — строка подключения к PostgreSQL для MCP (read-only). Если задана — один агент работает и с логами, и с БД. |
 
-Отдельный `.env` в `logs-ai-yandex/` не нужен — всё в соседних проектах.
+Отдельный `.env` в `ai-agent/` не нужен — всё в соседних проектах.
 
 **Два MCP (Graylog + Postgres):** при заданном `POSTGRES_MCP_DSN` агент поднимает ещё один MCP-сервер (stdio, `npx @modelcontextprotocol/server-postgres`). Нужен Node.js в окружении. Подробнее: [MCP_DUAL_GRAYLOG_POSTGRES.md](MCP_DUAL_GRAYLOG_POSTGRES.md).
 
@@ -76,13 +76,13 @@ uvicorn app:app --reload --port 8000
 
 ```bash
 cd /path/to/LogsAi
-docker compose -f logs-ai-yandex/docker-compose.yml --env-file .env up -d
+docker compose -f ai-agent/docker-compose.yml --env-file .env up -d
 ```
 
-Или из `logs-ai-yandex/` после `cp ../.env .env`:
+Или из `ai-agent/` после `cp ../.env .env`:
 
 ```bash
-cd logs-ai-yandex && cp ../.env .env 2>/dev/null || true
+cd ai-agent && cp ../.env .env 2>/dev/null || true
 docker compose up -d
 ```
 

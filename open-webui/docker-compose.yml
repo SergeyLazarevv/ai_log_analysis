@@ -1,0 +1,23 @@
+services:
+  open-webui:
+    image: "ghcr.io/open-webui/open-webui:main"
+    restart: unless-stopped
+    ports:
+      - "3000:8080"
+    environment:
+      # Указываем наш FastAPI как OpenAI-совместимый бэкенд
+      - OPENAI_API_BASE_URL=http://host.docker.internal:8000/v1
+      - OPENAI_API_KEY=logs-ai-key
+      # Отключаем загрузку моделей с Hugging Face (нет нужды, RAG не используем)
+      - HF_HUB_OFFLINE=1
+      - RAG_EMBEDDING_MODEL_AUTO_UPDATE=false
+      # Отключаем Ollama (используем только OpenAI-совместимый API)
+      - OLLAMA_BASE_URL=""
+      - ENABLE_OLLAMA_API=false
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - open_webui_data:/app/backend/data
+
+volumes:
+  open_webui_data:

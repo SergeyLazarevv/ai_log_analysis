@@ -61,9 +61,6 @@ class LogsAgent:
         history: list[dict[str, str]],
         mcp: MCPConnector,
     ) -> str:
-        use_postgres = any("query" in t["name"] or "table" in t["name"].lower()
-                           for t in mcp.tools if "postgres" not in t["name"].lower()) and self._config.postgres_dsn
-
         system_prompt = self._prompt_builder.build_system_prompt(mcp.tools, bool(self._config.postgres_dsn))
         messages = self._prompt_builder.build_messages(system_prompt, user_message, history)
         parser = ToolCallParser(mcp.tool_names)
