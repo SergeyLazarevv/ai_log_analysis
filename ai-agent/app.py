@@ -69,12 +69,14 @@ async def chat(raw_request: Request):
     if not msg:
         raise HTTPException(status_code=400, detail="Сообщение не может быть пустым")
 
+    # history = [{"role": t.role, "content": t.content} for t in (request.conversation or [])]
+    history: list = []
     log.info("[CHAT] Запрос: %d симв.: %s", len(msg), msg[:120])
     config = AppConfig.from_env()
     agent = LogsAgent(config)
 
     try:
-        response = await agent.run(msg, history=[])
+        response = await agent.run(msg, history=history)
         log.info("[CHAT] Ответ готов: %d симв.", len(response))
         return ChatResponse(response=response)
     except ValueError as e:
@@ -118,20 +120,29 @@ async def openai_chat_completions(raw_request: Request):
     body = await raw_request.json()
     messages: list[dict] = body.get("messages", [])
 
-    # Извлекаем последнее сообщение пользователя
-    user_messages = [m for m in messages if m.get("role") == "user"]
-    if not user_messages:
+    if not messages:
         raise HTTPException(status_code=400, detail="Нет сообщений пользователя")
-    msg = user_messages[-1].get("content", "").strip()
+
+    # Последнее сообщение — текущий вопрос, всё остальное — история диалога
+    current = messages[-1]
+    msg = (current.get("content") or "").strip()
     if not msg:
         raise HTTPException(status_code=400, detail="Пустое сообщение")
+    # history = [{"role": m["role"], "content": m.get("content", "")} for m in messages[:-1]]
+    history: list = []
+
+    # Open WebUI шлёт служебные запросы на генерацию подсказок и заголовков —
+    # они не требуют MCP, передаём напрямую в YandexGPT без агента.
+    _SYSTEM_PREFIXES = ("### Task:", "Generate a title", "Suggest ", "You are a title")
+    if any(msg.startswith(p) for p in _SYSTEM_PREFIXES):
+        return await _handle_utility_request(msg, body)
 
     log.info("[OPENAI] Запрос от Open WebUI: %d симв.: %s", len(msg), msg[:120])
     config = AppConfig.from_env()
     agent = LogsAgent(config)
 
     try:
-        response_text = await agent.run(msg, history=[])
+        response_text = await agent.run(msg, history=history)
         log.info("[OPENAI] Ответ готов: %d симв.", len(response_text))
     except Exception as e:
         log.exception("[OPENAI] Исключение при обработке запроса")
@@ -164,28 +175,56 @@ async def status():
     config = AppConfig.from_env()
     result: dict[str, str | None] = {
         "yandex": "ok" if (config.yandex_api_key and config.yandex_catalog_id)
-                  else "нет YANDEX_API_KEY или YANDEX_CATALOG_ID",
+                  else "нет YANDEX_API_KEY или YANDEX_CATALOG_ID",  # type: ignore[truthy-bool]
         "graylog_mcp": None,
-        "postgres_mcp_dsn": "задан" if config.postgres_dsn else "не задан (добавьте POSTGRES_MCP_DSN в .env)",
+        "postgres_mcp_dsn": "задан" if config.postgres.is_configured else "не задан (добавьте POSTGRES_MCP_DSN в .env)",
         "npx_available": None,
     }
 
-    result["graylog_mcp"] = await _check_graylog(config)
+    result["graylog_mcp"] = await _check_graylog(config.graylog.url, config.graylog.auth)
     result["npx_available"] = _check_npx()
 
     log.info("[STATUS] %s", result)
     return result
 
 
-# ── Вспомогательные функции статус-чека ────────────────────────────────────
+# ── Вспомогательные функции ─────────────────────────────────────────────────
 
-async def _check_graylog(config: AppConfig) -> str:
-    if not config.graylog_auth:
+async def _handle_utility_request(msg: str, body: dict) -> JSONResponse:
+    """Служебные запросы Open WebUI (подсказки, заголовки) — без MCP, напрямую в LLM."""
+    log.info("[OPENAI] Служебный запрос Open WebUI (%d симв.) — без MCP", len(msg))
+    config = AppConfig.from_env()
+    from yandex_client import YandexClient
+    try:
+        llm = YandexClient(
+            config.yandex_api_key,  # type: ignore[arg-type]
+            config.yandex_catalog_id,  # type: ignore[arg-type]
+            config.yandex_model,
+        )
+        response_text = await llm.complete([{"role": "user", "content": msg}])
+    except Exception:
+        response_text = ""
+    return JSONResponse({
+        "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": body.get("model", "ai-agent"),
+        "choices": [{
+            "index": 0,
+            "message": {"role": "assistant", "content": response_text},
+            "finish_reason": "stop",
+        }],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    })
+
+
+async def _check_graylog(url: str, auth: str) -> str:
+    if not auth:
         return "нет GRAYLOG_MCP_AUTH в .env"
     try:
         r = httpx.post(
-            config.graylog_url,
-            headers={"Authorization": config.graylog_auth, "Content-Type": "application/json"},
+            url,
+            headers={"Authorization": auth, "Content-Type": "application/json"},
             json={
                 "jsonrpc": "2.0", "id": 1, "method": "initialize",
                 "params": {

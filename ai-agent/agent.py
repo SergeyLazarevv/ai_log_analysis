@@ -16,6 +16,24 @@ log = logging.getLogger("logs_ai.agent")
 MAX_ITERATIONS = 20
 MAX_TOOL_RESULT_CHARS = 12_000
 
+# Фразы, по которым определяем что модель отказала вместо вызова инструмента
+_REFUSAL_PHRASES = (
+    "нет прямого доступа",
+    "нет доступа к",
+    "не имею доступа",
+    "не могу получить данные",
+    "не могу обратиться",
+    "не могу выполнить запрос",
+    "не имею возможности",
+)
+
+_REFUSAL_CORRECTION = (
+    "У тебя ЕСТЬ прямой доступ к данным через инструменты. "
+    "Не пиши объяснений — просто вызови подходящий инструмент в формате:\n"
+    "TOOL_CALL: имя_инструмента\n"
+    "{\"аргумент\": \"значение\"}"
+)
+
 
 class LogsAgent:
     """
@@ -41,14 +59,10 @@ class LogsAgent:
         log.info("[AGENT] ========== СТАРТ АГЕНТА ==========")
         log.info("[AGENT] message=%d симв., history=%d, postgres=%s",
                  len(user_message), len(history or []),
-                 "вкл" if self._config.postgres_dsn else "выкл")
+                 "вкл" if self._config.postgres.is_configured else "выкл")
 
         try:
-            async with MCPConnector(
-                self._config.graylog_url,
-                self._config.graylog_auth,
-                self._config.postgres_dsn,
-            ) as mcp:
+            async with MCPConnector.from_config(self._config) as mcp:
                 return await self._react_loop(user_message, history or [], mcp)
         except Exception as e:
             return self._build_error_response(e)
@@ -61,7 +75,7 @@ class LogsAgent:
         history: list[dict[str, str]],
         mcp: MCPConnector,
     ) -> str:
-        system_prompt = self._prompt_builder.build_system_prompt(mcp.tools, bool(self._config.postgres_dsn))
+        system_prompt = self._prompt_builder.build_system_prompt(mcp.tools, self._config.postgres.is_configured)
         messages = self._prompt_builder.build_messages(system_prompt, user_message, history)
         parser = ToolCallParser(mcp.tool_names)
 
@@ -83,12 +97,21 @@ class LogsAgent:
                 result_text = self._truncate_result(tool_name, result_text)
                 messages.append({"role": "assistant", "content": response_text})
                 messages.append({"role": "user", "content": f"[Результат вызова {tool_name}]:\n{result_text}"})
+            elif self._is_refusal(response_text) and iteration < MAX_ITERATIONS - 1:
+                log.warning("[AGENT] Модель отказала вместо TOOL_CALL — отправляю корректирующее сообщение")
+                messages.append({"role": "assistant", "content": response_text})
+                messages.append({"role": "user", "content": _REFUSAL_CORRECTION})
             else:
                 log.info("[AGENT] Финальный ответ (итерация %d)", iteration + 1)
                 return response_text.strip() or "Модель не вернула текст. Попробуйте переформулировать запрос."
 
         log.warning("[AGENT] Достигнут лимит итераций (%d)", MAX_ITERATIONS)
         return "Достигнут лимит итераций. Попробуйте переформулировать вопрос."
+
+    @staticmethod
+    def _is_refusal(text: str) -> bool:
+        lower = text.lower()
+        return any(phrase in lower for phrase in _REFUSAL_PHRASES)
 
     def _truncate_result(self, tool_name: str, result_text: str) -> str:
         if len(result_text) > MAX_TOOL_RESULT_CHARS:
@@ -122,7 +145,7 @@ class LogsAgent:
     def _build_llm(config: AppConfig) -> YandexClient:
         if not config.yandex_api_key or not config.yandex_catalog_id:
             raise ValueError("YANDEX_API_KEY и YANDEX_CATALOG_ID не заданы в .env")
-        return YandexClient(config.yandex_api_key, config.yandex_catalog_id, config.yandex_model)
+        return YandexClient(config.yandex_api_key, config.yandex_catalog_id, config.yandex_model)  # type: ignore[arg-type]
 
 
 # ── вспомогательные функции ────────────────────────────────────────────────
@@ -157,21 +180,3 @@ def _error_hint(exc: BaseException) -> str:
     return ""
 
 
-async def run_agent(
-    user_message: str,
-    graylog_url: str,
-    graylog_auth_header: str,
-    conversation_history: list[dict[str, str]] | None = None,
-    postgres_dsn: str | None = None,
-) -> str:
-    """Обратная совместимость с вызовом из app.py."""
-    import os
-    config = AppConfig(
-        graylog_url=graylog_url,
-        graylog_auth=graylog_auth_header,
-        postgres_dsn=postgres_dsn,
-        yandex_api_key=os.getenv("YANDEX_API_KEY") or os.getenv("YANDEX_OAUTH"),
-        yandex_catalog_id=os.getenv("YANDEX_CATALOG_ID"),
-        yandex_model=os.getenv("YANDEX_MODEL", "yandexgpt-lite"),
-    )
-    return await LogsAgent(config).run(user_message, conversation_history)
