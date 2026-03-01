@@ -133,7 +133,7 @@ function nowFloat(): float
 
 function randomOrderId(): string
 {
-    return (string)random_int(10000, 99999);
+    return (string)random_int(1, 10);
 }
 
 function buildGelf(
