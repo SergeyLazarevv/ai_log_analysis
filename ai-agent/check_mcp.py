@@ -107,7 +107,11 @@ def main():
             sys.exit(0)
         elif r.status_code == 401:
             print("❌ 401 Unauthorized — неверные учётные данные.")
-            print("   Проверьте GRAYLOG_MCP_AUTH. Должен быть Base64 от 'TOKEN:token'.")
+            print("   Graylog ожидает: Basic + base64(ваш_api_токен:token).")
+            print("   Токен создаётся: Graylog → System → Users and Teams → пользователь → Edit tokens.")
+            print("   Срок действия по умолчанию 30 дней — если токен старый, создайте новый.")
+            print("   Пример: echo -n 'ВСТАВЬТЕ_ТОКЕН_ИЗ_GRAYLOG:token' | base64 -w0")
+            print("   Затем в .env: GRAYLOG_MCP_AUTH=Basic <результат>")
         elif r.status_code == 400:
             print("❌ 400 Bad Request — сервер отклонил запрос.")
             err = r.json() if "application/json" in ct else {}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from config import AppConfig
@@ -64,8 +65,18 @@ class LogsAgent:
         try:
             async with MCPConnector.from_config(self._config) as mcp:
                 return await self._react_loop(user_message, history or [], mcp)
-        except Exception as e:
-            return self._build_error_response(e)
+        except asyncio.CancelledError:
+            # MCP-клиент при 401/сбое отменяет операцию через cancel scope —
+            # до нас доходит CancelledError, а не HTTPStatusError. Возвращаем
+            # понятное сообщение вместо 500.
+            return self._build_error_response(
+                RuntimeError(
+                    "Соединение с Graylog MCP прервано. Частая причина: 401 Unauthorized — "
+                    "проверьте GRAYLOG_MCP_AUTH в .env (Basic base64 от TOKEN:token)."
+                )
+            )
+        except BaseException as e:
+            return self._build_error_response(_unwrap_exception(e))
 
     # ── внутренние методы ──────────────────────────────────────────────────
 
@@ -75,7 +86,7 @@ class LogsAgent:
         history: list[dict[str, str]],
         mcp: MCPConnector,
     ) -> str:
-        system_prompt = self._prompt_builder.build_system_prompt(mcp.tools, self._config.postgres.is_configured)
+        system_prompt = self._prompt_builder.build_system_prompt(mcp.tools)
         messages = self._prompt_builder.build_messages(system_prompt, user_message, history)
         parser = ToolCallParser(mcp.tool_names)
 
@@ -96,7 +107,12 @@ class LogsAgent:
                 result_text = await mcp.call_tool(tool_name, tool_args)
                 result_text = self._truncate_result(tool_name, result_text)
                 messages.append({"role": "assistant", "content": response_text})
-                messages.append({"role": "user", "content": f"[Результат вызова {tool_name}]:\n{result_text}"})
+                messages.append({"role": "user", "content": (
+                    f"[Результат вызова {tool_name}]:\n{result_text}\n\n"
+                    f"Напоминание: исходный вопрос — «{user_message}»\n"
+                    "Если этих данных достаточно чтобы ответить на вопрос — дай финальный ответ пользователю.\n"
+                    "Если нужны дополнительные данные — вызови следующий инструмент."
+                )})
             elif self._is_refusal(response_text) and iteration < MAX_ITERATIONS - 1:
                 log.warning("[AGENT] Модель отказала вместо TOOL_CALL — отправляю корректирующее сообщение")
                 messages.append({"role": "assistant", "content": response_text})

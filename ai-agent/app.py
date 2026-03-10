@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import shutil
 from pathlib import Path
@@ -20,15 +21,15 @@ import uuid
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from agent import LogsAgent
 from config import AppConfig
 
-# Загрузка .env
+# Загрузка .env (override=True — .env всегда главнее переменных окружения shell)
 _root = Path(__file__).parent.parent
-load_dotenv(_root / ".env")
+load_dotenv(_root / ".env", override=True)
 load_dotenv(_root.parent / "yandexGptCli" / "src" / ".env")
 
 # ── FastAPI app ─────────────────────────────────────────────────────────────
@@ -40,6 +41,98 @@ app = FastAPI(title="AI Agent", description="Чат с Graylog и PostgreSQL ч�
 async def startup_event():
     config = AppConfig.from_env()
     log.info("[STARTUP] %s", config.log_summary())
+
+
+# ── Web UI (главная страница) ───────────────────────────────────────────────
+
+_INDEX_HTML = """
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LogsAI — чат с агентом</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 0; background: #1a1d23; color: #e4e6eb; min-height: 100vh; }
+    .container { max-width: 720px; margin: 0 auto; padding: 1rem; min-height: 100vh; display: flex; flex-direction: column; }
+    h1 { font-size: 1.25rem; margin: 0 0 1rem; font-weight: 600; }
+    .chat { flex: 1; overflow-y: auto; margin-bottom: 1rem; }
+    .msg { margin: 0.75rem 0; padding: 0.75rem 1rem; border-radius: 10px; max-width: 95%; white-space: pre-wrap; word-break: break-word; }
+    .msg.user { background: #2d3748; margin-left: 0; margin-right: auto; }
+    .msg.assistant { background: #2c5282; margin-left: auto; margin-right: 0; }
+    .msg.error { background: #742a2a; }
+    .form { display: flex; gap: 0.5rem; }
+    #input { flex: 1; padding: 0.75rem 1rem; border-radius: 8px; border: 1px solid #4a5568; background: #2d3748; color: #e4e6eb; font-size: 1rem; }
+    #input:focus { outline: none; border-color: #63b3ed; }
+    #send { padding: 0.75rem 1.25rem; border-radius: 8px; border: none; background: #3182ce; color: white; font-weight: 600; cursor: pointer; }
+    #send:hover { background: #2c5282; }
+    #send:disabled { opacity: 0.5; cursor: not-allowed; }
+    .status { font-size: 0.85rem; color: #a0aec0; margin-top: 0.5rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>LogsAI — чат с агентом (Graylog, БД, GitLab)</h1>
+    <div class="chat" id="chat"></div>
+    <form class="form" id="form">
+      <input type="text" id="input" placeholder="Задайте вопрос по логам, БД или коду..." autocomplete="off">
+      <button type="submit" id="send">Отправить</button>
+    </form>
+    <div class="status" id="status"></div>
+  </div>
+  <script>
+    const chat = document.getElementById('chat');
+    const form = document.getElementById('form');
+    const input = document.getElementById('input');
+    const send = document.getElementById('send');
+    const status = document.getElementById('status');
+
+    function addMsg(role, text, isError) {
+      const div = document.createElement('div');
+      div.className = 'msg ' + role + (isError ? ' error' : '');
+      div.textContent = text;
+      chat.appendChild(div);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+      addMsg('user', text);
+      send.disabled = true;
+      status.textContent = 'Отправка запроса...';
+
+      try {
+        const r = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text, conversation: [] })
+        });
+        const data = await r.json();
+        if (!r.ok) {
+          addMsg('assistant', 'Ошибка: ' + (data.detail || r.statusText), true);
+        } else {
+          addMsg('assistant', data.response || '');
+        }
+      } catch (err) {
+        addMsg('assistant', 'Ошибка сети: ' + err.message, true);
+      }
+      status.textContent = '';
+      send.disabled = false;
+    });
+  </script>
+</body>
+</html>
+"""
+
+
+@app.get("/", response_class=HTMLResponse)
+async def index():
+    """Главная страница — простой чат с агентом."""
+    return HTMLResponse(_INDEX_HTML)
 
 
 # ── Pydantic-модели ─────────────────────────────────────────────────────────
@@ -81,11 +174,15 @@ async def chat(raw_request: Request):
         return ChatResponse(response=response)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
+    except asyncio.CancelledError:
+        raise
+    except BaseException as e:
         log.exception("[CHAT] Исключение при обработке запроса")
         cause = e
         while getattr(cause, "__cause__", None):
             cause = cause.__cause__
+        if getattr(cause, "exceptions", None):
+            cause = cause.exceptions[0]
         raise HTTPException(status_code=500, detail=f"Ошибка: {cause}")
 
 
@@ -144,11 +241,15 @@ async def openai_chat_completions(raw_request: Request):
     try:
         response_text = await agent.run(msg, history=history)
         log.info("[OPENAI] Ответ готов: %d симв.", len(response_text))
-    except Exception as e:
+    except asyncio.CancelledError:
+        raise
+    except BaseException as e:
         log.exception("[OPENAI] Исключение при обработке запроса")
         cause = e
         while getattr(cause, "__cause__", None):
             cause = cause.__cause__
+        if getattr(cause, "exceptions", None):
+            cause = cause.exceptions[0]
         raise HTTPException(status_code=500, detail=f"Ошибка: {cause}")
 
     return JSONResponse({
@@ -237,6 +338,13 @@ async def _check_graylog(url: str, auth: str) -> str:
         )
         if r.status_code == 200:
             return "ok"
+        if r.status_code == 401:
+            return (
+                "401 Unauthorized. Формат: GRAYLOG_MCP_AUTH=Basic <base64(ваш_токен:token)>. "
+                "Токен: Graylog → System → Users and Teams → пользователь → Edit tokens. "
+                "Срок действия по умолчанию 30 дней — создайте новый токен. "
+                "Проверка: из каталога ai-agent выполните python check_mcp.py"
+            )
         data = r.json() if "application/json" in (r.headers.get("content-type") or "") else {}
         return f"ошибка {r.status_code}: {data.get('message', r.text[:200])}"
     except Exception as e:

@@ -16,7 +16,19 @@
 2. **Graylog:** если `graylog_mcp` не «ok»:
    - Запущен ли Graylog? (`docker compose ps`, порт 9000).
    - Включён ли MCP: в веб-интерфейсе Graylog → System → Configurations → MCP → Enable.
-   - В `LogsAi/.env` заданы `GRAYLOG_MCP_URL` (например `http://127.0.0.1:9000/api/mcp`) и `GRAYLOG_MCP_AUTH` (Basic и base64 от `API_TOKEN:token`).
+   - В `LogsAi/.env` заданы `GRAYLOG_MCP_URL` (например `http://127.0.0.1:9000/api/mcp`) и `GRAYLOG_MCP_AUTH` (см. ниже формат).
+
+**Если в статусе 401 Unauthorized от Graylog MCP:**
+
+- Формат авторизации: **Basic** + base64(**ваш_токен:token**). Вместо «ваш_токен» — строка токена из Graylog (не логин и не пароль). Пароль в паре всегда буквально слово `token`.
+- Токен создаётся: **Graylog → System → Users and Teams** → выберите пользователя (например admin) → **Edit tokens** → Create Token. Скопируйте токен сразу (потом его не покажут).
+- Срок действия по умолчанию **30 дней**. Если токен старый, создайте новый и обновите `.env`.
+- Сборка значения в терминале:
+  ```bash
+  echo -n 'ВСТАВЬТЕ_СЮДА_ТОКЕН_ИЗ_GRAYLOG:token' | base64 -w0
+  ```
+  В `.env`: `GRAYLOG_MCP_AUTH=Basic <результат_выше>`.
+- Диагностика из каталога `ai-agent`: `python check_mcp.py` — скрипт покажет ответ сервера и подсказки.
 
 3. **Postgres MCP:** если нужны вопросы по БД:
    - В `.env` задан `POSTGRES_MCP_DSN=postgresql://logsai:пароль@127.0.0.1:5432/logsai` (хост 127.0.0.1 при локальном запуске).

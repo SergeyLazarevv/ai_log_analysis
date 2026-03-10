@@ -10,7 +10,7 @@ import logging
 from contextlib import AsyncExitStack
 
 from config import AppConfig
-from connectors import BaseMCPConnector, GraylogConnector, PostgresConnector
+from connectors import BaseMCPConnector, GitLabConnector, GraylogConnector, PostgresConnector
 
 log = logging.getLogger("logs_ai.mcp")
 
@@ -39,6 +39,8 @@ class MCPConnector:
         ]
         if config.postgres.is_configured:
             connectors.append(PostgresConnector(config.postgres.dsn))  # type: ignore[arg-type]
+        if config.gitlab.is_configured:
+            connectors.append(GitLabConnector(config.gitlab.url, config.gitlab.token))
         return cls(connectors)
 
     # ── публичный интерфейс ────────────────────────────────────────────────

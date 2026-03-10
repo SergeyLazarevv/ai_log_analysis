@@ -7,11 +7,13 @@
 """
 
 from .base import BaseMCPConnector
+from .gitlab import GitLabConnector
 from .graylog import GraylogConnector
 from .postgres import PostgresConnector
 
 __all__ = [
     "BaseMCPConnector",
+    "GitLabConnector",
     "GraylogConnector",
     "PostgresConnector",
 ]
